@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>肺超声AR评分系统</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        #videoContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        #camera {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .ar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        
+        .score-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            z-index: 100;
+            min-width: 200px;
+        }
+        
+        .score-number {
+            font-size: 64px;
+            font-weight: bold;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        }
+        
+        .score-0 { color: #4CAF50; }
+        .score-1 { color: #FFC107; }
+        .score-2 { color: #FF9800; }
+        .score-3 { color: #F44336; }
+        
+        .info-text {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+        
+        .zone-panel {
+            position: fixed;
+            bottom: 100px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        
+        .zone-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 5px;
+            margin-top: 10px;
+        }
+        
+        .zone-cell {
+            padding: 8px 4px;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            font-size: 10px;
+        }
+        
+        .zone-cell.active {
+            background: #667eea;
+            font-weight: bold;
+        }
+        
+        .zone-cell.completed {
+            background: #4CAF50;
+        }
+        
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            z-index: 100;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-secondary { background: #2196F3; color: white; }
+        .btn-warning { background: #FF9800; color: white; }
+        
+        .ar-marker {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            border: 3px solid #667eea;
+            border-radius: 10px;
+            background: rgba(102, 126, 234, 0.2);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.05); }
+        }
+        
+        .ar-label {
+            position: absolute;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .permission-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .permission-content {
+            max-width: 400px;
+        }
+        
+        .permission-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="permission-overlay" id="permissionOverlay">
+        <div class="permission-content">
+            <div class="permission-icon">🦞</div>
+            <h1 style="font-size: 28px; margin-bottom: 20px;">肺超声AR评分系统</h1>
+            <p style="font-size: 16px; margin-bottom: 30px; opacity: 0.9;">
+                需要摄像头权限才能使用AR功能
+            </p>
+            <button class="btn btn-primary" onclick="startAR()" style="width: 100%; padding: 15px; font-size: 16px;">
+                🎥 启动AR摄像头
+            </button>
+            <p style="font-size: 12px; margin-top: 20px; opacity: 0.7;">
+                提示：AR功能需要摄像头权限
+            </p>
+        </div>
+    </div>
+
+    <div id="videoContainer">
+        <video id="camera" autoplay playsinline></video>
+    </div>
+
+    <div class="ar-overlay" id="arOverlay">
+        <!-- AR标记会动态添加到这里 -->
+    </div>
+
+    <div class="score-panel">
+        <div class="score-number score-0" id="scoreValue">0</div>
+        <div class="info-text">置信度: <span id="confidence">95%</span></div>
+        <div class="info-text">分区: <span id="currentZone">RUL-PS</span></div>
+        <div class="info-text">完成: <span id="completed">0</span>/12</div>
+    </div>
+
+    <div class="zone-panel">
+        <div style="font-size: 12px; font-weight: bold; margin-bottom: 5px;">12分区导航</div>
+        <div class="zone-grid" id="zoneGrid"></div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-primary" onclick="analyze()">🔍 分析</button>
+        <button class="btn btn-secondary" onclick="saveZone()">💾 保存</button>
+        <button class="btn btn-secondary" onclick="nextZone()">➡️ 下一个</button>
+        <button class="btn btn-warning" onclick="generateReport()">📊 报告</button>
+    </div>
+
+    <script>
+        // 应用状态
+        const state = {
+            stream: null,
+            zones: [
+                'RUL-PS', 'RUL-AL', 'RUL-PL',
+                'RLL-AL', 'RLL-PL', 'RLL-POS',
+                'LUL-PS', 'LUL-AL', 'LUL-PL',
+                'LLL-AL', 'LLL-PL', 'LLL-POS'
+            ],
+            currentZoneIndex: 0,
+            currentScore: 0,
+            currentConfidence: 0.95,
+            zoneResults: {},
+            analyzing: false
+        };
+
+        // 启动AR
+        async function startAR() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    }
+                });
+                
+                state.stream = stream;
+                document.getElementById('camera').srcObject = stream;
+                document.getElementById('permissionOverlay').style.display = 'none';
+                
+                initZoneGrid();
+                createARMarker();
+                
+                console.log('✅ AR摄像头已启动');
+            } catch (error) {
+                alert('无法访问摄像头: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        // 创建AR标记
+        function createARMarker() {
+            const overlay = document.getElementById('arOverlay');
+            
+            // 创建中心标记框
+            const marker = document.createElement('div');
+            marker.className = 'ar-marker';
+            marker.style.left = '50%';
+            marker.style.top = '50%';
+            marker.style.transform = 'translate(-50%, -50%)';
+            overlay.appendChild(marker);
+            
+            // 创建评分标签
+            const label = document.createElement('div');
+            label.className = 'ar-label';
+            label.id = 'arLabel';
+            label.style.left = '50%';
+            label.style.top = '30%';
+            label.style.transform = 'translate(-50%, -50%)';
+            label.textContent = '评分: 0 - 正常';
+            overlay.appendChild(label);
+        }
+
+        // 分析当前帧
+        function analyze() {
+            if (!state.stream) {
+                alert('请先启动摄像头');
+                return;
+            }
+            
+            // 模拟AI分析
+            state.currentScore = Math.floor(Math.random() * 4);
+            state.currentConfidence = 0.85 + Math.random() * 0.15;
+            
+            // 更新显示
+            updateScoreDisplay();
+            updateARLabel();
+        }
+
+        // 更新评分显示
+        function updateScoreDisplay() {
+            const scoreEl = document.getElementById('scoreValue');
+            scoreEl.textContent = state.currentScore;
+            scoreEl.className = `score-number score-${state.currentScore}`;
+            
+            document.getElementById('confidence').textContent = 
+                (state.currentConfidence * 100).toFixed(0) + '%';
+        }
+
+        // 更新AR标签
+        function updateARLabel() {
+            const levels = ['正常', '轻度', '中度', '重度'];
+            const label = document.getElementById('arLabel');
+            label.textContent = `评分: ${state.currentScore} - ${levels[state.currentScore]}`;
+            
+            // 根据评分改变颜色
+            const colors = ['#4CAF50', '#FFC107', '#FF9800', '#F44336'];
+            label.style.background = colors[state.currentScore];
+        }
+
+        // 保存当前分区
+        function saveZone() {
+            const zone = state.zones[state.currentZoneIndex];
+            state.zoneResults[zone] = {
+                score: state.currentScore,
+                confidence: state.currentConfidence,
+                timestamp: new Date().toLocaleTimeString()
+            };
+            
+            updateCompleted();
+            initZoneGrid();
+            alert(`已保存 ${zone}: ${state.currentScore}分`);
+        }
+
+        // 下一分区
+        function nextZone() {
+            saveZone();
+            state.currentZoneIndex = (state.currentZoneIndex + 1) % state.zones.length;
+            
+            const zone = state.zones[state.currentZoneIndex];
+            document.getElementById('currentZone').textContent = zone;
+            
+            initZoneGrid();
+        }
+
+        // 初始化分区地图
+        function initZoneGrid() {
+            const grid = document.getElementById('zoneGrid');
+            grid.innerHTML = '';
+            
+            state.zones.forEach((zone, index) => {
+                const cell = document.createElement('div');
+                cell.className = 'zone-cell';
+                cell.textContent = zone.replace('-', '\n');
+                
+                if (index === state.currentZoneIndex) {
+                    cell.classList.add('active');
+                }
+                
+                if (state.zoneResults[zone]) {
+                    cell.classList.add('completed');
+                }
+                
+                grid.appendChild(cell);
+            });
+        }
+
+        // 更新完成度
+        function updateCompleted() {
+            const completed = Object.keys(state.zoneResults).length;
+            document.getElementById('completed').textContent = completed;
+        }
+
+        // 生成报告
+        function generateReport() {
+            const results = state.zoneResults;
+            const completed = Object.keys(results).length;
+            
+            if (completed === 0) {
+                alert('还没有保存任何评分');
+                return;
+            }
+            
+            const totalScore = Object.values(results).reduce((sum, r) => sum + r.score, 0);
+            const severity = totalScore <= 5 ? '正常或轻微' : 
+                            totalScore <= 12 ? '轻度' : 
+                            totalScore <= 20 ? '中度' : '重度';
+            
+            let report = `肺超声评分报告\n\n`;
+            report += `总分: ${totalScore}/36\n`;
+            report += `完成度: ${completed}/12\n`;
+            report += `严重程度: ${severity}\n\n`;
+            report += `分区详情:\n`;
+            
+            for (const [zone, data] of Object.entries(results)) {
+                report += `${zone}: ${data.score}分 (${(data.confidence * 100).toFixed(0)}%)\n`;
+            }
+            
+            alert(report);
+        }
+
+        // 页面加载完成
+        window.onload = function() {
+            console.log('🦞 肺超声AR评分系统已加载');
+        };
+    </script>
+</body>
+</html>
