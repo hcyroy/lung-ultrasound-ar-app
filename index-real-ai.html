@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>肺超声AI评分系统 - 真实AI版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: #fff;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        .api-status {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 8px 15px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .api-status .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff5252;
+            animation: pulse 2s infinite;
+        }
+
+        .api-status.connected .dot {
+            background: #4CAF50;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .video-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            position: relative;
+        }
+
+        #video {
+            max-width: 100%;
+            max-height: 50vh;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            background: #000;
+        }
+
+        .score-overlay {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            min-width: 150px;
+        }
+
+        .score-value {
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .confidence-value, .label-value {
+            font-size: 16px;
+            margin-top: 5px;
+            opacity: 0.9;
+        }
+
+        .zone-info {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            display: flex;
+            justify-content: space-around;
+            gap: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #45a049;
+        }
+
+        .btn-secondary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #0b7dda;
+        }
+
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+        }
+
+        .btn-warning:hover:not(:disabled) {
+            background: #e68900;
+        }
+
+        .report-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .report-content {
+            background: white;
+            color: #333;
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .close-btn {
+            font-size: 24px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            color: #999;
+        }
+
+        .loading-indicator {
+            text-align: center;
+            padding: 10px;
+            color: #666;
+        }
+
+        .loading-indicator::after {
+            content: '';
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body>
+    <div class="api-status" id="apiStatus">
+        <div class="dot"></div>
+        <span id="apiStatusText">API: 检查中...</span>
+    </div>
+
+    <div class="header">
+        <h1>🦞 肺超声AI评分系统</h1>
+        <p>真实AI分析 · TensorFlow ResNet50</p>
+    </div>
+
+    <div class="video-container">
+        <video id="video" autoplay playsinline></video>
+
+        <div class="score-overlay" id="scoreOverlay">
+            <div class="score-value" id="scoreValue">--</div>
+            <div class="confidence-value" id="confidenceValue">置信度: --</div>
+            <div class="label-value" id="labelValue">分类: --</div>
+        </div>
+
+        <div class="zone-info" id="zoneInfo">
+            当前分区: <span id="currentZone">RUL-PS</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-primary" id="btnStart">📷 开始</button>
+        <button class="btn btn-secondary" id="btnCapture" disabled>📸 评分</button>
+        <button class="btn btn-secondary" id="btnNext" disabled>➡️ 下一区</button>
+        <button class="btn btn-warning" id="btnReport" disabled>📊 报告</button>
+    </div>
+
+    <div class="report-modal" id="reportModal">
+        <div class="report-content">
+            <div class="report-header">
+                <h2>肺超声评分报告</h2>
+                <button class="close-btn" id="closeReport">×</button>
+            </div>
+            <div id="reportBody"></div>
+        </div>
+    </div>
+
+    <script>
+        // 配置 - API地址
+        const API_BASE = window.location.hostname === 'localhost'
+            ? 'http://localhost:5000'
+            : 'http://8.149.57.30:5000';  // 修改为你的服务器公网IP
+
+        // 应用状态
+        const state = {
+            video: null,
+            stream: null,
+            currentZone: 0,
+            zones: [
+                'RUL-PS', 'RUL-AL', 'RUL-PL',
+                'RLL-AL', 'RLL-PL', 'RLL-POS',
+                'LUL-PS', 'LUL-AL', 'LUL-PL',
+                'LLL-AL', 'LLL-PL', 'LLL-POS'
+            ],
+            zoneScores: {},
+            zoneDetails: {}
+        };
+
+        // 分区名称
+        const zoneNames = {
+            'RUL-PS': '右上肺-胸骨旁区',
+            'RUL-AL': '右上肺-前外侧区',
+            'RUL-PL': '右上肺-后外侧区',
+            'RLL-AL': '右下肺-前外侧区',
+            'RLL-PL': '右下肺-后外侧区',
+            'RLL-POS': '右下肺-后侧区',
+            'LUL-PS': '左上肺-胸骨旁区',
+            'LUL-AL': '左上肺-前外侧区',
+            'LUL-PL': '左上肺-后外侧区',
+            'LLL-AL': '左下肺-前外侧区',
+            'LLL-PL': '左下肺-后外侧区',
+            'LLL-POS': '左下肺-后侧区'
+        };
+
+        // 检查API状态
+        async function checkAPIStatus() {
+            const statusEl = document.getElementById('apiStatus');
+            const statusText = document.getElementById('apiStatusText');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/health`);
+                const data = await response.json();
+
+                if (data.status === 'ok' && data.model_loaded) {
+                    statusEl.classList.add('connected');
+                    statusText.textContent = 'API: 已连接 ✓ (真实AI)';
+                    return true;
+                } else {
+                    statusText.textContent = 'API: 模型未加载';
+                    return false;
+                }
+            } catch (error) {
+                statusText.textContent = 'API: 连接失败 ✗';
+                console.error('API连接失败:', error);
+                return false;
+            }
+        }
+
+        // 初始化摄像头
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+
+                state.stream = stream;
+                state.video.srcObject = stream;
+
+                document.getElementById('btnCapture').disabled = false;
+                document.getElementById('btnNext').disabled = false;
+
+                return true;
+            } catch (error) {
+                alert('无法访问摄像头: ' + error.message);
+                return false;
+            }
+        }
+
+        // 捕获图像并发送到API
+        async function captureAndAnalyze() {
+            const video = document.getElementById('video');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            // 转换为base64
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+            // 获取当前分区
+            const zone = state.zones[state.currentZone];
+
+            // 显示加载状态
+            document.getElementById('scoreValue').textContent = '...';
+            document.getElementById('confidenceValue').textContent = '分析中...';
+            document.getElementById('labelValue').textContent = '加载中';
+
+            try {
+                // 调用API
+                const response = await fetch(`${API_BASE}/api/predict`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,
+                        zone: zone
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const result = data.result;
+
+                    // 保存结果
+                    state.zoneScores[zone] = result.lus_score;
+                    state.zoneDetails[zone] = result;
+
+                    // 更新UI
+                    updateScoreDisplay(result);
+
+                    // 启用报告按钮
+                    document.getElementById('btnReport').disabled = false;
+                } else {
+                    alert('分析失败: ' + data.error);
+                }
+            } catch (error) {
+                alert('API调用失败: ' + error.message);
+            }
+        }
+
+        // 更新评分显示
+        function updateScoreDisplay(result) {
+            const scoreElement = document.getElementById('scoreValue');
+            const confidenceElement = document.getElementById('confidenceValue');
+            const labelElement = document.getElementById('labelValue');
+            const scoreOverlay = document.getElementById('scoreOverlay');
+
+            scoreElement.textContent = result.lus_score;
+            confidenceElement.textContent = `置信度: ${(result.confidence * 100).toFixed(1)}%`;
+            labelElement.textContent = result.classification_label;
+
+            // 根据分数设置颜色
+            let color;
+            switch(result.lus_score) {
+                case 0: color = '#4CAF50'; break; // 绿色 - 正常
+                case 1: color = '#FFC107'; break; // 黄色 - 轻度
+                case 2: color = '#FF9800'; break; // 橙色 - 中度
+                case 3: color = '#F44336'; break; // 红色 - 重度
+            }
+
+            scoreOverlay.style.borderLeft = `4px solid ${color}`;
+        }
+
+        // 切换到下一分区
+        function nextZone() {
+            state.currentZone = (state.currentZone + 1) % state.zones.length;
+            const zone = state.zones[state.currentZone];
+            document.getElementById('currentZone').textContent = zoneNames[zone];
+        }
+
+        // 生成报告
+        function generateReport() {
+            const totalScore = Object.values(state.zoneScores).reduce((a, b) => a + b, 0);
+
+            let severity = '正常或轻微';
+            if (totalScore > 20) severity = '重度';
+            else if (totalScore > 12) severity = '中度';
+            else if (totalScore > 5) severity = '轻度';
+
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px;">总体评分</h3>
+                    <div style="font-size: 48px; font-weight: bold; color: #667eea;">
+                        ${totalScore} / 36
+                    </div>
+                    <div style="font-size: 18px; margin-top: 5px; color: #666;">
+                        严重程度: ${severity}
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px;">分区详情</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f5f5f5;">
+                                <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">分区</th>
+                                <th style="padding: 10px; text-align: center; border: 1px solid #ddd;">评分</th>
+                                <th style="padding: 10px; text-align: center; border: 1px solid #ddd;">分类</th>
+                                <th style="padding: 10px; text-align: center; border: 1px solid #ddd;">置信度</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            for (const zone of state.zones) {
+                const detail = state.zoneDetails[zone];
+                if (detail) {
+                    html += `
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #ddd;">${zoneNames[zone]}</td>
+                            <td style="padding: 10px; text-align: center; border: 1px solid #ddd; font-weight: bold;">
+                                ${detail.lus_score}
+                            </td>
+                            <td style="padding: 10px; text-align: center; border: 1px solid #ddd;">
+                                ${detail.classification_label}
+                            </td>
+                            <td style="padding: 10px; text-align: center; border: 1px solid #ddd;">
+                                ${(detail.confidence * 100).toFixed(1)}%
+                            </td>
+                        </tr>
+                    `;
+                }
+            }
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                    <h4 style="margin-bottom: 10px;">评分说明</h4>
+                    <ul style="margin-left: 20px; font-size: 14px; color: #666;">
+                        <li>0分: 正常（A线）</li>
+                        <li>1分: 离散B线（≥3条）</li>
+                        <li>2分: 融合B线</li>
+                        <li>3分: 实变</li>
+                    </ul>
+                </div>
+
+                <div style="text-align: center; margin-top: 20px;">
+                    <button onclick="window.print()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                        打印报告
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('reportBody').innerHTML = html;
+            document.getElementById('reportModal').style.display = 'block';
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            state.video = document.getElementById('video');
+
+            // 检查API
+            await checkAPIStatus();
+
+            // 定期检查API状态
+            setInterval(checkAPIStatus, 30000);
+
+            // 绑定按钮事件
+            document.getElementById('btnStart').addEventListener('click', async () => {
+                const btn = document.getElementById('btnStart');
+                btn.disabled = true;
+                btn.textContent = '启动中...';
+
+                await initCamera();
+
+                btn.textContent = '📷 已启动';
+            });
+
+            document.getElementById('btnCapture').addEventListener('click', captureAndAnalyze);
+            document.getElementById('btnNext').addEventListener('click', nextZone);
+            document.getElementById('btnReport').addEventListener('click', generateReport);
+
+            document.getElementById('closeReport').addEventListener('click', () => {
+                document.getElementById('reportModal').style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html>
